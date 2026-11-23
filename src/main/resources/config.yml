@@ -1,15 +1,14 @@
 # BASTION MC | Purpur 1.21.11
 combat:
   seconds: 20
-  worlds: [world]
   # Lista vacía = todos los mundos excepto los excluidos
   enabled-worlds: []
-  disabled-worlds: [spawn]
+  disabled-worlds: []  # No excluyas Void: contiene la Mina PvP.
   tag-projectiles: true
   block-teleports: true
   block-safe-zones: true
-  block-arena-exits: true
   block-chorus-fruit: true
+  block-arena-exits: true
   anti-fly:
     enabled: true
     protect-fall-seconds: 4
@@ -17,6 +16,16 @@ combat:
     enabled: true
     respect-keep-inventory: true
     kill-without-keep-inventory: true
+arenas:
+  # Protege toda la altura del mapa aunque marques las esquinas a la misma Y.
+  full-height: true
+barrier:
+  enabled: true
+  # Cristal falso: visible solo para el jugador bloqueado, sin editar el mundo.
+  material: RED_STAINED_GLASS
+  duration-ticks: 30
+  horizontal-radius: 1
+  height: 3
 commands:
   blocked:
     - spawn

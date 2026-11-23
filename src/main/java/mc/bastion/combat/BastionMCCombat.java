@@ -35,6 +35,9 @@ import org.bukkit.event.player.PlayerTeleportEvent;
 import org.bukkit.event.player.PlayerToggleFlightEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.Material;
+import org.bukkit.block.data.BlockData;
+import org.bukkit.block.Block;
+import org.bukkit.util.Vector;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.projectiles.ProjectileSource;
 import org.bukkit.event.block.Action;
@@ -45,18 +48,22 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public final class BastionMCCombat extends JavaPlugin implements Listener, CommandExecutor, TabCompleter {
+    private static boolean verticalFullHeight = true;
     private static final Pattern HEX = Pattern.compile("&#([0-9a-fA-F]{6})");
     private final Map<UUID,Long> tagged = new HashMap<>();
     private final Map<UUID,Long> pearls = new HashMap<>();
     private final Map<UUID,Long> fallSafe = new HashMap<>();
     private final Map<UUID,Long> lastWarnings = new HashMap<>();
     private final Map<UUID,Long> endNotice = new HashMap<>();
+    private final Map<UUID, Set<Location>> shownGlass = new HashMap<>();
+    private final Map<UUID, Long> glassExpiry = new HashMap<>();
     private final Map<String,Area> arenas = new LinkedHashMap<>();
     private FileConfiguration messages, arenaYaml;
     private File arenaFile;
 
     @Override public void onEnable() {
         saveDefaultConfig();
+        migrateOldWorldConfiguration();
         File messageFile = new File(getDataFolder(), "messages.yml");
         if (!messageFile.exists()) saveResource("messages.yml", false);
         reloadExtra();
@@ -67,9 +74,24 @@ public final class BastionMCCombat extends JavaPlugin implements Listener, Comma
         if (Bukkit.getPluginManager().isPluginEnabled("BastionMCProtections"))
             getLogger().warning("BastionMCProtections detectado: integración nativa pendiente de su API/código. El plugin no puede verificar automáticamente bases dinámicas ni bloquear su flag PvP todavía.");
     }
-    @Override public void onDisable() { tagged.clear(); pearls.clear(); endNotice.clear(); }
+    @Override public void onDisable() {
+        for (Player p:Bukkit.getOnlinePlayers()) clearGlass(p);
+        tagged.clear(); pearls.clear(); endNotice.clear();
+    }
+    private void migrateOldWorldConfiguration() {
+        // v1.0.0 excluded spawn despite PvP arenas living there. Preserve all custom lists.
+        List<String> disabled = new ArrayList<>(getConfig().getStringList("combat.disabled-worlds"));
+        if (disabled.size()==1 && disabled.get(0).equalsIgnoreCase("spawn")) {
+            disabled.clear();
+            getConfig().set("combat.disabled-worlds",disabled);
+            getConfig().set("combat.worlds",null); // legacy unused option
+            saveConfig();
+            getLogger().info("Migración: spawn habilitado para PvP (zona segura sigue controlada por WorldGuard).");
+        }
+    }
     private void reloadExtra() {
         reloadConfig();
+        verticalFullHeight=getConfig().getBoolean("arenas.full-height",true);
         messages = YamlConfiguration.loadConfiguration(new File(getDataFolder(), "messages.yml"));
         arenaFile = new File(getDataFolder(), "arenas.yml");
         arenaYaml = YamlConfiguration.loadConfiguration(arenaFile);
@@ -95,8 +117,8 @@ public final class BastionMCCombat extends JavaPlugin implements Listener, Comma
         boolean contains(Location l) {
             if (first==null || second==null || l.getWorld()==null || !world.equals(l.getWorld().getName())) return false;
             return l.getBlockX()>=Math.min(first.x,second.x) && l.getBlockX()<=Math.max(first.x,second.x)
-                && l.getBlockY()>=Math.min(first.y,second.y) && l.getBlockY()<=Math.max(first.y,second.y)
-                && l.getBlockZ()>=Math.min(first.z,second.z) && l.getBlockZ()<=Math.max(first.z,second.z);
+                && l.getBlockZ()>=Math.min(first.z,second.z) && l.getBlockZ()<=Math.max(first.z,second.z)
+                && (!BastionMCCombat.verticalFullHeight || (l.getBlockY()>=Math.min(first.y,second.y) && l.getBlockY()<=Math.max(first.y,second.y)));
         }
     }
     private Point readPoint(String path) {
@@ -181,6 +203,7 @@ public final class BastionMCCombat extends JavaPlugin implements Listener, Comma
         if (!active(e.getPlayer()) || e.getTo()==null) return;
         boolean pearl=e.getCause()==PlayerTeleportEvent.TeleportCause.ENDER_PEARL;
         if ((!pearl && getConfig().getBoolean("combat.block-teleports",true)) || forbiddenTransition(e.getPlayer(),e.getFrom(),e.getTo())) {
+            if (e.getFrom().getWorld().equals(e.getTo().getWorld())) showGlass(e.getPlayer(),e.getFrom(),e.getTo());
             e.setCancelled(true);warning(e.getPlayer(),"blocked-teleport");
         }
     }
@@ -189,8 +212,49 @@ public final class BastionMCCombat extends JavaPlugin implements Listener, Comma
         if (!active(e.getPlayer()) || e.getTo()==null) return;
         if (e.getFrom().getBlockX()==e.getTo().getBlockX() && e.getFrom().getBlockY()==e.getTo().getBlockY() && e.getFrom().getBlockZ()==e.getTo().getBlockZ()) return;
         if (forbiddenTransition(e.getPlayer(),e.getFrom(),e.getTo())) {
-            e.setTo(e.getFrom());warning(e.getPlayer(),"blocked-safe");
+            showGlass(e.getPlayer(),e.getFrom(),e.getTo());
+            e.setTo(e.getFrom());
+            e.setCancelled(true);
+            warning(e.getPlayer(),"blocked-safe");
         }
+    }
+    /** Client-side red glass preview. Nothing is placed in the real world. */
+    private void showGlass(Player p, Location from, Location destination) {
+        if (!getConfig().getBoolean("barrier.enabled",true) || from.getWorld()==null || destination.getWorld()==null
+                || !from.getWorld().equals(destination.getWorld())) return;
+        long current=now();
+        if (current < glassExpiry.getOrDefault(p.getUniqueId(),0L)) return;
+        clearGlass(p);
+        Material material=Material.matchMaterial(getConfig().getString("barrier.material","RED_STAINED_GLASS"));
+        if (material==null || !material.isBlock()) material=Material.RED_STAINED_GLASS;
+        BlockData fake=Bukkit.createBlockData(material);
+        int radius=Math.max(0,Math.min(3,getConfig().getInt("barrier.horizontal-radius",1)));
+        int height=Math.max(1,Math.min(5,getConfig().getInt("barrier.height",3)));
+        int x=destination.getBlockX(),y=from.getBlockY(),z=destination.getBlockZ();
+        double dx=destination.getX()-from.getX(), dz=destination.getZ()-from.getZ();
+        boolean alongX=Math.abs(dx)>=Math.abs(dz);
+        Set<Location> positions=new HashSet<>();
+        for (int h=0;h<height;h++) for(int r=-radius;r<=radius;r++) {
+            Location at=new Location(from.getWorld(),x+(alongX?0:r),y+h,z+(alongX?r:0));
+            Block block=at.getBlock();
+            // Fake only empty space; never obscure actual solid blocks or inventories.
+            if (!block.isEmpty()) continue;
+            p.sendBlockChange(at,fake);
+            positions.add(at);
+        }
+        if (positions.isEmpty())return;
+        shownGlass.put(p.getUniqueId(),positions);
+        long millis=Math.max(5,getConfig().getLong("barrier.duration-ticks",30))*50L;
+        glassExpiry.put(p.getUniqueId(),current+millis);
+        Bukkit.getScheduler().runTaskLater(this,()->{
+            if (p.isOnline() && now()>=glassExpiry.getOrDefault(p.getUniqueId(),0L)) clearGlass(p);
+        },Math.max(5,getConfig().getLong("barrier.duration-ticks",30))+1L);
+    }
+    private void clearGlass(Player p) {
+        Set<Location> positions=shownGlass.remove(p.getUniqueId());
+        glassExpiry.remove(p.getUniqueId());
+        if (positions!=null && p.isOnline()) for(Location at:positions)
+            if (at.getWorld()!=null && at.getWorld().equals(p.getWorld())) p.sendBlockChange(at,at.getBlock().getBlockData());
     }
     private boolean forbiddenTransition(Player player,Location from,Location to) {
         if (getConfig().getBoolean("combat.block-arena-exits",true))
@@ -258,11 +322,12 @@ public final class BastionMCCombat extends JavaPlugin implements Listener, Comma
     }
     @EventHandler public void death(PlayerDeathEvent e) {
         UUID id=e.getEntity().getUniqueId();
-        tagged.remove(id);endNotice.remove(id); fallSafe.remove(id);
+        tagged.remove(id);endNotice.remove(id); fallSafe.remove(id); clearGlass(e.getEntity());
     }
     @EventHandler(priority=EventPriority.MONITOR)
     public void quit(PlayerQuitEvent e) {
         Player p=e.getPlayer();boolean fighting=active(p);
+        clearGlass(p);
         tagged.remove(p.getUniqueId());endNotice.remove(p.getUniqueId());fallSafe.remove(p.getUniqueId());
         if (!fighting || !getConfig().getBoolean("combat.logout.enabled",true)) return;
         // Respect the REAL gamerule, so keepInventory=true ALWAYS exempts a player from combat-log punishment.

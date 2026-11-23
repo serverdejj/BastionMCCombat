@@ -1,4 +1,4 @@
-# BastionMCCombat v1.0.0
+# BastionMCCombat v1.0.1
 
 **Código fuente para Purpur/Paper 1.21.11, Java 21.** Compilar con `gradle build`, o subir el contenido del ZIP a la raíz de GitHub y ejecutar Actions. El JAR estará en `build/libs/`.
 
@@ -40,3 +40,17 @@ Se aplicará cuando una arena llamada `minapvp` esté configurada mediante `/com
 4. Prueba en un servidor de desarrollo los casos de límites de arena, caída de objetos y `keepInventory`.
 
 **No verificado aún mediante compilación de Gradle ni prueba en un servidor activo.**
+
+
+## v1.0.1 - Corrección arenas y cristal rojo
+- `spawn` ya no se excluye del PvP: la v1.0.0 lo excluía aunque contenía Mina PvP.
+- Migración al iniciar: si el archivo existente solo excluía `spawn`, se corrige automáticamente.
+- `/combat setarena` usa límites horizontales X/Z con altura completa por defecto.
+- En combate, al intentar cruzar un límite prohibido, cancela el movimiento y muestra una pared temporal de cristal rojo **solo al jugador**, sin colocar bloques en el mapa.
+- `barrier` y `arenas.full-height` son configurables en `config.yml`. Copia estas secciones a tu config existente o usa `/combat reload` tras añadirlas.
+- Conserva `plugins/BastionMCCombat/arenas.yml`, que guarda los límites existentes.
+- Los bloques falsos no son una barrera física: el bloqueo real se realiza con el evento de movimiento.
+- La protección dinámica de BastionMCProtections continúa pendiente de integración.
+
+## Aclaración sobre el mundo de la mina
+El mundo del usuario se llama exactamente `Void` (V mayúscula), no `spawn`. `minapvp` es el ID de la región/arena, no el nombre del mundo. En `combat.disabled-worlds` no debe estar `Void`. Usa `/combat delarena minapvp` y `/combat setarena minapvp 1` y `2` dentro de `Void` si las esquinas se guardaron previamente en otro mundo. `combat.enabled-worlds: []` deja activo combate en los mundos PvP sin excluir Survival.
