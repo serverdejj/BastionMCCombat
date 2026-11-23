@@ -74,7 +74,7 @@ public final class BastionMCCombat extends JavaPlugin implements Listener, Comma
         Objects.requireNonNull(getCommand("combat")).setTabCompleter(this);
         Bukkit.getScheduler().runTaskTimer(this, this::tick, 20L, 20L);
         if (Bukkit.getPluginManager().isPluginEnabled("BastionMCProtections"))
-            getLogger().warning("BastionMCProtections detectado: integración nativa pendiente de su API/código. El plugin no puede verificar automáticamente bases dinámicas ni bloquear su flag PvP todavía.");
+            getLogger().info("BastionMCProtections detectado. API de detección de bases activada si instalaste la versión integrada.");
     }
     @Override public void onDisable() {
         for (Player p:Bukkit.getOnlinePlayers()) clearGlass(p);
@@ -147,6 +147,23 @@ public final class BastionMCCombat extends JavaPlugin implements Listener, Comma
         return end>now()?(int)Math.ceil((end-now())/1000.0):0;
     }
     private boolean active(Player p) {return seconds(p)>0;}
+    /** API for BastionMCProtections: true when any tagged player is inside the same base. */
+    public boolean hasActiveFightAt(Location location) {
+        if(location==null || !Bukkit.getPluginManager().isPluginEnabled("BastionMCProtections")) return false;
+        for(Player p:Bukkit.getOnlinePlayers()) if(active(p) && p.getWorld().equals(location.getWorld())) {
+            if(isSameProtection(p.getLocation(),location))return true;
+        }
+        return false;
+    }
+    private boolean isSameProtection(Location a,Location b) {
+        try {
+            org.bukkit.plugin.Plugin plugin=Bukkit.getPluginManager().getPlugin("BastionMCProtections");
+            var m=plugin.getClass().getMethod("protectionIdAt",Location.class);
+            Object id=m.invoke(plugin,b);
+            return id!=null && id.equals(m.invoke(plugin,a));
+        }catch(ReflectiveOperationException ex){return false;}
+    }
+
     private boolean enabledWorld(World w) {
         if (w==null) return false;
         List<String> enabled=getConfig().getStringList("combat.enabled-worlds");
@@ -250,12 +267,12 @@ public final class BastionMCCombat extends JavaPlugin implements Listener, Comma
         } else fake=Bukkit.createBlockData(material);
         int radius=Math.max(0,Math.min(4,getConfig().getInt("barrier.horizontal-radius",2)));
         int height=Math.max(1,Math.min(5,getConfig().getInt("barrier.height",3)));
-        int x=destination.getBlockX(), y=from.getBlockY(), z=destination.getBlockZ();
+        int x=from.getBlockX()+(alongX?(dx>=0?1:-1):0), y=from.getBlockY(), z=from.getBlockZ()+(!alongX?(dz>=0?1:-1):0);
         Set<Location> positions=new HashSet<>();
         for (int h=0;h<height;h++) for(int r=-radius;r<=radius;r++) {
             Location at=new Location(from.getWorld(),x+(alongX?0:r),y+h,z+(alongX?r:0));
             // Never cover real solids, chests or other existing block contents.
-            if (!at.getBlock().isEmpty()) continue;
+            if (!at.getBlock().isPassable()) continue;
             positions.add(at);
         }
         if (positions.isEmpty()) return;
@@ -278,7 +295,7 @@ public final class BastionMCCombat extends JavaPlugin implements Listener, Comma
         Set<Location> positions=shownGlass.get(id);
         BlockData fake=glassData.get(id);
         if (positions==null || fake==null) return;
-        for (Location at:positions) if (p.getWorld().equals(at.getWorld()) && at.getBlock().isEmpty())
+        for (Location at:positions) if (p.getWorld().equals(at.getWorld()) && at.getBlock().isPassable())
             p.sendBlockChange(at,fake);
     }
     private void clearGlass(Player p) {
@@ -291,12 +308,15 @@ public final class BastionMCCombat extends JavaPlugin implements Listener, Comma
             if (at.getWorld()!=null && at.getWorld().equals(p.getWorld())) p.sendBlockChange(at,at.getBlock().getBlockData());
     }
     private boolean forbiddenTransition(Player player,Location from,Location to) {
+        if (getConfig().getBoolean("protections.enabled",true) && ProtectionsBridge.isProtected(to)
+                && !isSameProtection(from,to)) return true;
         if (getConfig().getBoolean("combat.block-arena-exits",true))
             for (Area a: arenas.values()) if (a.contains(from) && !a.contains(to)) {warning(player,"blocked-arena");return true;}
         if (getConfig().getBoolean("combat.block-safe-zones",true) && !safe(from) && safe(to)) return true;
         return false;
     }
     private boolean safe(Location l) {
+        if (getConfig().getBoolean("protections.enabled",true) && ProtectionsBridge.isProtected(l)) return true;
         for (Map<?,?> raw:getConfig().getMapList("protected-zones")) {
             try {
                 if (!String.valueOf(raw.get("world")).equals(l.getWorld().getName())) continue;

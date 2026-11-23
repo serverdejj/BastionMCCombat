@@ -66,6 +66,8 @@ worldguard:
   block-pvp-deny-regions: true
   # También pueden indicarse IDs de regiones seguras sin flag explícita
   safe-region-ids: []
+protections:
+  enabled: true # Requires updated BastionMCProtections JAR included in the other ZIP
 protected-zones: [] # Zonas manuales adicionales: [{world: world, min: {x: 0, y: 0, z: 0}, max: {x: 10, y: 255, z: 10}}]
 messages:
   # Ver messages.yml para todos los textos
