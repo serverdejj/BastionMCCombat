@@ -1,0 +1,25 @@
+name: BastionMCCombat
+version: 1.0.0
+main: mc.bastion.combat.BastionMCCombat
+api-version: '1.21'
+author: BASTION MC
+softdepend: [WorldGuard, BastionMCProtections]
+commands:
+  combat:
+    description: Administración de combate PvP
+    usage: /combat <reload|status|add|remove|setarena|delarena|arenas>
+permissions:
+  bastioncombat.admin.reload: {default: op}
+  bastioncombat.admin.status: {default: op}
+  bastioncombat.admin.add: {default: op}
+  bastioncombat.admin.remove: {default: op}
+  bastioncombat.admin.arenas: {default: op}
+  bastioncombat.admin.*:
+    default: op
+    children:
+      bastioncombat.admin.reload: true
+      bastioncombat.admin.status: true
+      bastioncombat.admin.add: true
+      bastioncombat.admin.remove: true
+      bastioncombat.admin.arenas: true
+  bastioncombat.bypass: {default: false}

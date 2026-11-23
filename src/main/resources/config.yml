@@ -1,0 +1,63 @@
+# BASTION MC | Purpur 1.21.11
+combat:
+  seconds: 20
+  worlds: [world]
+  # Lista vacía = todos los mundos excepto los excluidos
+  enabled-worlds: []
+  disabled-worlds: [spawn]
+  tag-projectiles: true
+  block-teleports: true
+  block-safe-zones: true
+  block-arena-exits: true
+  block-chorus-fruit: true
+  anti-fly:
+    enabled: true
+    protect-fall-seconds: 4
+  logout:
+    enabled: true
+    respect-keep-inventory: true
+    kill-without-keep-inventory: true
+commands:
+  blocked:
+    - spawn
+    - home
+    - homes
+    - sethome
+    - tpa
+    - tpahere
+    - tpaccept
+    - tp
+    - teleport
+    - warp
+    - back
+    - rtp
+    - randomtp
+    - afk
+    - pv
+    - mochila
+    - mochilas
+    - prote
+    - protes
+    - protecciones
+    - enderchest
+    - ec
+    - fly
+    - clan home
+    - clan base
+  # Se bloquean también variantes plugin:comando
+ender-pearls:
+  enabled: true
+  default-cooldown-seconds: 20
+  # Reservado para cuando exista BastionMCMines
+  future-mina-pvp-cooldown-seconds: 100
+  zone-cooldowns: {}
+worldguard:
+  enabled: true
+  # Las regiones con flag PVP=deny se tratan como zonas seguras
+  block-pvp-deny-regions: true
+  # También pueden indicarse IDs de regiones seguras sin flag explícita
+  safe-region-ids: []
+protected-zones: [] # Zonas manuales adicionales: [{world: world, min: {x: 0, y: 0, z: 0}, max: {x: 10, y: 255, z: 10}}]
+messages:
+  # Ver messages.yml para todos los textos
+  anti-spam-milliseconds: 1500
