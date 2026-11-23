@@ -16,6 +16,15 @@ combat:
     enabled: true
     respect-keep-inventory: true
     kill-without-keep-inventory: true
+    # Mostrar anuncio global cuando un jugador sale en combate.
+    broadcast: true
+    # Con keepInventory=true NO hay muerte ni pérdida de objetos.
+    broadcast-when-exempt: true
+  respawn:
+    # Experimental: limpia ticks normales de inmunidad al daño tras reaparecer.
+    # No garantiza eliminar protecciones de otros plugins o del servidor.
+    clear-no-damage-ticks: true
+    clear-after-ticks: 2
 arenas:
   # Protege toda la altura del mapa aunque marques las esquinas a la misma Y.
   full-height: true

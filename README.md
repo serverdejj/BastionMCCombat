@@ -22,7 +22,7 @@
 La sanción por logout se implementa con la muerte normal al ejecutarse `PlayerQuitEvent`; hay que probar la interacción con plugins de muerte, keepInventory por-permisos, inventarios guardados y reinicios en el servidor de pruebas. No se manipulan manualmente inventarios para evitar duplicaciones.
 
 ## Permisos
-`bastioncombat.admin.reload`, `.status`, `.add`, `.remove`, `.arenas` y `bastioncombat.admin.*` (OP por defecto), `bastioncombat.bypass` (desactivado por defecto). Los rangos adicionales se conceden con LuckPerms.
+`bastioncombat.admin.reload`, `.status`, `.add`, `.remove`, `.arenas` y `bastioncombat.admin.*` (OP por defecto), `bastioncombat.bypass` (activado por defecto). Los rangos adicionales se conceden con LuckPerms.
 
 ## Ejemplo cooldown específico
 ```yaml
@@ -63,3 +63,20 @@ El mundo del usuario se llama exactamente `Void` (V mayúscula), no `spawn`. `mi
 - Si conservas `plugins/BastionMCCombat/config.yml`, actualiza manualmente `barrier.material: RED_STAINED_GLASS_PANE` (o usa `/combat reload`).
 - El bloqueo de salida de arenas se conserva.
 - **El retraso de PvP tras reaparecer no se altera**: no se ha confirmado qué sistema produce los 3–5 segundos de inmunidad. Comprueba el mundo y región de reaparición y cualquier plugin de spawn protection antes de retirarlo.
+
+
+## Cambios v1.0.4
+- Aviso global de desconexión durante combate con mensajes editables en `messages.yml`.
+- `combat.logout.broadcast-when-exempt` permite también anunciar desconexiones en mundos con keepInventory, sin penalizar al jugador.
+- `combat.respawn.clear-no-damage-ticks` (activado por defecto) prueba a limpiar ticks comunes de inmunidad tras reaparecer; no anula necesariamente otras protecciones.
+- Conserva las arenas, barreras rojas y la integración con BastionMCProtections de v1.0.3.
+- Para actualizar configuraciones existentes, agrega las claves nuevas manualmente; Bukkit no sobrescribe los YAML existentes.
+
+
+## v1.0.5 — Aviso con rival
+- El plugin guarda el último jugador que hizo o recibió daño PvP válido de cada combatiente.
+- Al desconectarse durante el combate, anuncia `☠ {player} se ha ido de la partida mientras estaba en un combate con {opponent}` con el prefijo `BASTION PVP »`.
+- Los combates grupales muestran el último rival con el que hubo daño; si el estado se activó por un administrador y no hubo rival, se muestra el valor configurable `combat-logout-unknown-opponent`.
+- Respeta la regla anterior: `keepInventory=true` evita la penalización, pero puede seguir anunciando la desconexión.
+- Añade `combat-logout-broadcast` y `combat-logout-unknown-opponent` a tu `messages.yml` instalado si deseas el nuevo formato; las claves del JAR no reemplazan automáticamente un YAML existente.
+- No borres `arenas.yml` ni el directorio de datos. La integración con protecciones y las barreras visuales se mantienen.

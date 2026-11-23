@@ -31,6 +31,7 @@ import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerItemConsumeEvent;
 import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.event.player.PlayerRespawnEvent;
 import org.bukkit.event.player.PlayerTeleportEvent;
 import org.bukkit.event.player.PlayerToggleFlightEvent;
 import org.bukkit.inventory.ItemStack;
@@ -51,6 +52,8 @@ public final class BastionMCCombat extends JavaPlugin implements Listener, Comma
     private static boolean verticalFullHeight = true;
     private static final Pattern HEX = Pattern.compile("&#([0-9a-fA-F]{6})");
     private final Map<UUID,Long> tagged = new HashMap<>();
+    /** Last PvP opponent, refreshed only when a valid damage event occurs. */
+    private final Map<UUID,UUID> lastOpponent = new HashMap<>();
     private final Map<UUID,Long> pearls = new HashMap<>();
     private final Map<UUID,Long> fallSafe = new HashMap<>();
     private final Map<UUID,Long> lastWarnings = new HashMap<>();
@@ -78,7 +81,7 @@ public final class BastionMCCombat extends JavaPlugin implements Listener, Comma
     }
     @Override public void onDisable() {
         for (Player p:Bukkit.getOnlinePlayers()) clearGlass(p);
-        tagged.clear(); pearls.clear(); endNotice.clear();
+        tagged.clear(); lastOpponent.clear(); pearls.clear(); endNotice.clear();
     }
     private void migrateOldWorldConfiguration() {
         // v1.0.0 excluded spawn despite PvP arenas living there. Preserve all custom lists.
@@ -201,6 +204,9 @@ public final class BastionMCCombat extends JavaPlugin implements Listener, Comma
         if (attacker==null || attacker.equals(victim)) return;
         if (!enabledWorld(victim.getWorld())) return;
         tag(attacker); tag(victim);
+        // Track the last real opponent for the global combat-logout announcement.
+        if (active(attacker)) lastOpponent.put(attacker.getUniqueId(),victim.getUniqueId());
+        if (active(victim)) lastOpponent.put(victim.getUniqueId(),attacker.getUniqueId());
     }
     @EventHandler(priority=EventPriority.HIGHEST,ignoreCancelled=true)
     public void onCommandPreprocess(PlayerCommandPreprocessEvent e) {
@@ -376,18 +382,56 @@ public final class BastionMCCombat extends JavaPlugin implements Listener, Comma
     }
     @EventHandler public void death(PlayerDeathEvent e) {
         UUID id=e.getEntity().getUniqueId();
-        tagged.remove(id);endNotice.remove(id); fallSafe.remove(id); clearGlass(e.getEntity());
+        tagged.remove(id);lastOpponent.remove(id);endNotice.remove(id); fallSafe.remove(id); clearGlass(e.getEntity());
     }
     @EventHandler(priority=EventPriority.MONITOR)
     public void quit(PlayerQuitEvent e) {
-        Player p=e.getPlayer();boolean fighting=active(p);
+        Player p=e.getPlayer();
+        boolean fighting=active(p);
+        UUID opponentId=lastOpponent.remove(p.getUniqueId());
+        String opponentName=null;
+        if (opponentId!=null) {
+            Player opponent=Bukkit.getPlayer(opponentId);
+            if (opponent!=null) opponentName=opponent.getName();
+            else {
+                org.bukkit.OfflinePlayer offline=Bukkit.getOfflinePlayer(opponentId);
+                opponentName=offline.getName();
+            }
+        }
+        if(opponentName==null || opponentName.isBlank()) opponentName=raw("combat-logout-unknown-opponent");
         clearGlass(p);
-        tagged.remove(p.getUniqueId());endNotice.remove(p.getUniqueId());fallSafe.remove(p.getUniqueId());
+        tagged.remove(p.getUniqueId());
+        endNotice.remove(p.getUniqueId());
+        fallSafe.remove(p.getUniqueId());
         if (!fighting || !getConfig().getBoolean("combat.logout.enabled",true)) return;
-        // Respect the REAL gamerule, so keepInventory=true ALWAYS exempts a player from combat-log punishment.
+
         Boolean keep=p.getWorld().getGameRuleValue(GameRule.KEEP_INVENTORY);
-        if (Boolean.TRUE.equals(keep) && getConfig().getBoolean("combat.logout.respect-keep-inventory",true)) return;
+        boolean exempt=Boolean.TRUE.equals(keep) && getConfig().getBoolean("combat.logout.respect-keep-inventory",true);
+        // Announce once per combat logout. Exempt worlds get a distinct, honest message.
+        if (getConfig().getBoolean("combat.logout.broadcast",true)
+                && (!exempt || getConfig().getBoolean("combat.logout.broadcast-when-exempt",true))) {
+            String key=exempt?"combat-logout-safe":"combat-logout-penalty";
+            String template=messages.contains("combat-logout-broadcast")
+                    ? raw("combat-logout-broadcast") : raw(key);
+            String announcement=template.replace("{player}",p.getName())
+                    .replace("{opponent}",opponentName);
+            Bukkit.broadcastMessage(color(raw("prefix")+announcement));
+        }
+        if (exempt) return;
         if (getConfig().getBoolean("combat.logout.kill-without-keep-inventory",true) && !p.isDead()) p.setHealth(0.0);
+    }
+
+    /** Optional attempt to clear regular damage immunity after respawn.
+     * Other plugins and vanilla-level immunity may override this; no fake guarantees.
+     */
+    @EventHandler(priority=EventPriority.MONITOR)
+    public void respawn(PlayerRespawnEvent e) {
+        if (!getConfig().getBoolean("combat.respawn.clear-no-damage-ticks",false)) return;
+        UUID id=e.getPlayer().getUniqueId();
+        Bukkit.getScheduler().runTaskLater(this,()->{
+            Player p=Bukkit.getPlayer(id);
+            if (p!=null && p.isOnline() && !p.isDead()) p.setNoDamageTicks(0);
+        },Math.max(1L,getConfig().getLong("combat.respawn.clear-after-ticks",2L)));
     }
     private void tick() {
         long now=now();
@@ -397,6 +441,7 @@ public final class BastionMCCombat extends JavaPlugin implements Listener, Comma
                 int remaining=seconds(p);
                 if (remaining<=0) {
                     tagged.remove(id);
+                    lastOpponent.remove(id);
                     endNotice.put(id,now+Math.max(0,messages.getInt("ended-actionbar-seconds",3))*1000L);
                 } else {
                     actionBar(p,raw("actionbar").replace("{seconds}",String.valueOf(remaining)));
@@ -448,8 +493,8 @@ public final class BastionMCCombat extends JavaPlugin implements Listener, Comma
                 Player target=Bukkit.getPlayerExact(args[1]);if(target==null){msg(sender,"player-not-found");return true;}
                 switch(sub) {
                     case "status" -> msg(sender,active(target)?"status-active":"status-clear",Map.of("player",target.getName(),"seconds",String.valueOf(seconds(target))));
-                    case "add" -> {tagged.put(target.getUniqueId(),now()+duration()*1000L);enforceFlight(target);msg(sender,"added",Map.of("player",target.getName()));}
-                    case "remove" -> {tagged.remove(target.getUniqueId());endNotice.remove(target.getUniqueId());msg(sender,"removed",Map.of("player",target.getName()));}
+                    case "add" -> {lastOpponent.remove(target.getUniqueId());tagged.put(target.getUniqueId(),now()+duration()*1000L);enforceFlight(target);msg(sender,"added",Map.of("player",target.getName()));}
+                    case "remove" -> {tagged.remove(target.getUniqueId());lastOpponent.remove(target.getUniqueId());endNotice.remove(target.getUniqueId());msg(sender,"removed",Map.of("player",target.getName()));}
                 }
             }
             case "arenas" -> {if(!permit(sender,"arenas"))return true;msg(sender,"arena-list",Map.of("arenas",arenas.isEmpty()?"(ninguna)":String.join(", ",arenas.keySet())));}
