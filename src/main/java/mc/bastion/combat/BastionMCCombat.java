@@ -57,6 +57,8 @@ public final class BastionMCCombat extends JavaPlugin implements Listener, Comma
     private final Map<UUID,Long> endNotice = new HashMap<>();
     private final Map<UUID, Set<Location>> shownGlass = new HashMap<>();
     private final Map<UUID, Long> glassExpiry = new HashMap<>();
+    private final Map<UUID, Long> glassLastSent = new HashMap<>();
+    private final Map<UUID, BlockData> glassData = new HashMap<>();
     private final Map<String,Area> arenas = new LinkedHashMap<>();
     private FileConfiguration messages, arenaYaml;
     private File arenaFile;
@@ -218,41 +220,73 @@ public final class BastionMCCombat extends JavaPlugin implements Listener, Comma
             warning(e.getPlayer(),"blocked-safe");
         }
     }
-    /** Client-side red glass preview. Nothing is placed in the real world. */
+    /**
+     * Show fake red panes at a forbidden boundary, only to the affected player.
+     * Delay one tick because cancelled movement can send a real-block correction
+     * which would immediately hide a synchronous sendBlockChange call.
+     */
     private void showGlass(Player p, Location from, Location destination) {
         if (!getConfig().getBoolean("barrier.enabled",true) || from.getWorld()==null || destination.getWorld()==null
                 || !from.getWorld().equals(destination.getWorld())) return;
+        UUID id=p.getUniqueId();
         long current=now();
-        if (current < glassExpiry.getOrDefault(p.getUniqueId(),0L)) return;
+        if (current < glassExpiry.getOrDefault(id,0L) && shownGlass.containsKey(id)) {
+            if (current-glassLastSent.getOrDefault(id,0L)>=250L) {
+                glassLastSent.put(id,current);
+                Bukkit.getScheduler().runTaskLater(this,()->sendFakeGlass(p,id),1L);
+            }
+            return;
+        }
         clearGlass(p);
-        Material material=Material.matchMaterial(getConfig().getString("barrier.material","RED_STAINED_GLASS"));
-        if (material==null || !material.isBlock()) material=Material.RED_STAINED_GLASS;
-        BlockData fake=Bukkit.createBlockData(material);
-        int radius=Math.max(0,Math.min(3,getConfig().getInt("barrier.horizontal-radius",1)));
-        int height=Math.max(1,Math.min(5,getConfig().getInt("barrier.height",3)));
-        int x=destination.getBlockX(),y=from.getBlockY(),z=destination.getBlockZ();
+        Material material=Material.matchMaterial(getConfig().getString("barrier.material","RED_STAINED_GLASS_PANE"));
+        if (material==null || !material.isBlock()) material=Material.RED_STAINED_GLASS_PANE;
         double dx=destination.getX()-from.getX(), dz=destination.getZ()-from.getZ();
         boolean alongX=Math.abs(dx)>=Math.abs(dz);
+        BlockData fake;
+        if (material==Material.RED_STAINED_GLASS_PANE) {
+            fake=Bukkit.createBlockData(alongX
+                    ?"minecraft:red_stained_glass_pane[north=true,south=true]"
+                    :"minecraft:red_stained_glass_pane[east=true,west=true]");
+        } else fake=Bukkit.createBlockData(material);
+        int radius=Math.max(0,Math.min(4,getConfig().getInt("barrier.horizontal-radius",2)));
+        int height=Math.max(1,Math.min(5,getConfig().getInt("barrier.height",3)));
+        int x=destination.getBlockX(), y=from.getBlockY(), z=destination.getBlockZ();
         Set<Location> positions=new HashSet<>();
         for (int h=0;h<height;h++) for(int r=-radius;r<=radius;r++) {
             Location at=new Location(from.getWorld(),x+(alongX?0:r),y+h,z+(alongX?r:0));
-            Block block=at.getBlock();
-            // Fake only empty space; never obscure actual solid blocks or inventories.
-            if (!block.isEmpty()) continue;
-            p.sendBlockChange(at,fake);
+            // Never cover real solids, chests or other existing block contents.
+            if (!at.getBlock().isEmpty()) continue;
             positions.add(at);
         }
-        if (positions.isEmpty())return;
-        shownGlass.put(p.getUniqueId(),positions);
-        long millis=Math.max(5,getConfig().getLong("barrier.duration-ticks",30))*50L;
-        glassExpiry.put(p.getUniqueId(),current+millis);
+        if (positions.isEmpty()) return;
+        shownGlass.put(id,positions);
+        glassData.put(id,fake);
+        int lifetime=Math.max(10,getConfig().getInt("barrier.duration-ticks",40));
+        glassExpiry.put(id,current+lifetime*50L);
+        glassLastSent.put(id,current);
+        // Repeat shortly after the cancelled movement; packets sent on that same
+        // tick can otherwise be overwritten by the server's position correction.
+        for (long delay: new long[]{1L,3L,7L,12L}) {
+            if (delay<lifetime) Bukkit.getScheduler().runTaskLater(this,()->sendFakeGlass(p,id),delay);
+        }
         Bukkit.getScheduler().runTaskLater(this,()->{
-            if (p.isOnline() && now()>=glassExpiry.getOrDefault(p.getUniqueId(),0L)) clearGlass(p);
-        },Math.max(5,getConfig().getLong("barrier.duration-ticks",30))+1L);
+            if (now()>=glassExpiry.getOrDefault(id,0L)) clearGlass(p);
+        },lifetime+2L);
+    }
+    private void sendFakeGlass(Player p,UUID id) {
+        if (!p.isOnline() || now()>=glassExpiry.getOrDefault(id,0L)) return;
+        Set<Location> positions=shownGlass.get(id);
+        BlockData fake=glassData.get(id);
+        if (positions==null || fake==null) return;
+        for (Location at:positions) if (p.getWorld().equals(at.getWorld()) && at.getBlock().isEmpty())
+            p.sendBlockChange(at,fake);
     }
     private void clearGlass(Player p) {
-        Set<Location> positions=shownGlass.remove(p.getUniqueId());
-        glassExpiry.remove(p.getUniqueId());
+        UUID id=p.getUniqueId();
+        Set<Location> positions=shownGlass.remove(id);
+        glassExpiry.remove(id);
+        glassLastSent.remove(id);
+        glassData.remove(id);
         if (positions!=null && p.isOnline()) for(Location at:positions)
             if (at.getWorld()!=null && at.getWorld().equals(p.getWorld())) p.sendBlockChange(at,at.getBlock().getBlockData());
     }

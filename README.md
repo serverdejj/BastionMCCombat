@@ -54,3 +54,12 @@ Se aplicará cuando una arena llamada `minapvp` esté configurada mediante `/com
 
 ## Aclaración sobre el mundo de la mina
 El mundo del usuario se llama exactamente `Void` (V mayúscula), no `spawn`. `minapvp` es el ID de la región/arena, no el nombre del mundo. En `combat.disabled-worlds` no debe estar `Void`. Usa `/combat delarena minapvp` y `/combat setarena minapvp 1` y `2` dentro de `Void` si las esquinas se guardaron previamente en otro mundo. `combat.enabled-worlds: []` deja activo combate en los mundos PvP sin excluir Survival.
+
+
+## v1.0.2 – paneles rojos
+- Barrera visual con `RED_STAINED_GLASS_PANE` en la frontera del área PvP.
+- Reenvío de paneles al cliente después de cancelar el movimiento para evitar que se oculten instantáneamente.
+- Ningún bloque real del mundo es cambiado.
+- Si conservas `plugins/BastionMCCombat/config.yml`, actualiza manualmente `barrier.material: RED_STAINED_GLASS_PANE` (o usa `/combat reload`).
+- El bloqueo de salida de arenas se conserva.
+- **El retraso de PvP tras reaparecer no se altera**: no se ha confirmado qué sistema produce los 3–5 segundos de inmunidad. Comprueba el mundo y región de reaparición y cualquier plugin de spawn protection antes de retirarlo.

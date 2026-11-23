@@ -22,9 +22,9 @@ arenas:
 barrier:
   enabled: true
   # Cristal falso: visible solo para el jugador bloqueado, sin editar el mundo.
-  material: RED_STAINED_GLASS
-  duration-ticks: 30
-  horizontal-radius: 1
+  material: RED_STAINED_GLASS_PANE
+  duration-ticks: 40
+  horizontal-radius: 2
   height: 3
 commands:
   blocked:
